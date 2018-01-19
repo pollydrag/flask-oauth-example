@@ -1,79 +1,67 @@
-from flask import Flask, redirect, url_for, render_template, flash
+from flask import Flask, request
 from flask_sqlalchemy import SQLAlchemy
-from flask_login import LoginManager, UserMixin, login_user, logout_user,\
-    current_user
-from oauth import OAuthSignIn
 
+from oauth import AuthClient
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'top secret!'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///db.sqlite'
 app.config['OAUTH_CREDENTIALS'] = {
-    'facebook': {
-        'id': '470154729788964',
-        'secret': '010cc08bd4f51e34f3f3e684fbdea8a7'
+    'github': {
+        'key': 'ed3d864fa006f2ab5071',
+        'secret': '14890487d51df43013cb5b559a243fd496742c72'
     },
-    'twitter': {
-        'id': '3RzWQclolxWZIMq5LJqzRZPTl',
-        'secret': 'm9TEd58DSEtRrZHpz2EjrV9AhsBRxKMo8m3kuIZj3zLwzwIimt'
-    }
+    'facebook': {
+        'key': '1182730845163848',
+        'secret': '3a7ac784a303a2a3234c7d3bc491a757'
+    },
+    #'twitter': {
+    #    'key': '3RzWQclolxWZIMq5LJqzRZPTl',
+    #    'secret': 'm9TEd58DSEtRrZHpz2EjrV9AhsBRxKMo8m3kuIZj3zLwzwIimt'
+    #}
 }
 
 db = SQLAlchemy(app)
-lm = LoginManager(app)
-lm.login_view = 'index'
 
 
-class User(UserMixin, db.Model):
+class User(db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     social_id = db.Column(db.String(64), nullable=False, unique=True)
-    nickname = db.Column(db.String(64), nullable=False)
-    email = db.Column(db.String(64), nullable=True)
+    email = db.Column(db.String(64), nullable=False)
 
 
-@lm.user_loader
-def load_user(id):
-    return User.query.get(int(id))
-
-
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-
-@app.route('/logout')
-def logout():
-    logout_user()
-    return redirect(url_for('index'))
-
-
-@app.route('/authorize/<provider>')
+@app.route('/oauth/<provider>/redirect')
 def oauth_authorize(provider):
-    if not current_user.is_anonymous:
-        return redirect(url_for('index'))
-    oauth = OAuthSignIn.get_provider(provider)
-    return oauth.authorize()
+    oauth = AuthClient.get_provider(provider)
+    return oauth.authorization_url()
 
 
+# TODO: move to frontend
 @app.route('/callback/<provider>')
 def oauth_callback(provider):
-    if not current_user.is_anonymous:
-        return redirect(url_for('index'))
-    oauth = OAuthSignIn.get_provider(provider)
-    social_id, username, email = oauth.callback()
+    return 'OK'
+
+from flask import jsonify
+@app.route('/oauth/<provider>/token')
+def oauth_token(provider):
+    oauth = AuthClient.get_provider(provider)
+    social_id, email = oauth.fetch(request.args) # TODO: remove username
     if social_id is None:
-        flash('Authentication failed.')
-        return redirect(url_for('index'))
+        # TODO make_error
+        return jsonify({'error': 'Not autorized'})
+    if email is None:
+        return jsonify({'error': 'Email not provided'})
+
     user = User.query.filter_by(social_id=social_id).first()
     if not user:
-        user = User(social_id=social_id, nickname=username, email=email)
+        user = User(social_id=social_id, email=email)
         db.session.add(user)
         db.session.commit()
-    login_user(user, True)
-    return redirect(url_for('index'))
 
+    return jsonify(dict(email=email, social_id=social_id)) # TODO: token
+    
 
 if __name__ == '__main__':
     db.create_all()
-    app.run(debug=True)
+    app.run(host='dbadmins.ru', debug=True)
