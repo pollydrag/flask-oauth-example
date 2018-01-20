@@ -1,7 +1,13 @@
 import json
 
 from authlib.client import OAuthClient
+from authlib.client.errors import OAuthException
 from flask import current_app, url_for, jsonify
+
+
+class AuthException(Exception):
+    pass
+
 
 class AuthClient(object):
     providers = None
@@ -20,8 +26,11 @@ class AuthClient(object):
 
     def _callback_url(self):
         # TODO:
-        return url_for('oauth_callback', provider=self.provider_name,
-                       _external=True)
+        return url_for(
+            'oauth_callback', 
+            provider=self.provider_name,
+            _external=True
+        )
 
     @classmethod
     def get_provider(self, provider_name):
@@ -30,7 +39,7 @@ class AuthClient(object):
             for provider_class in self.__subclasses__():
                 provider = provider_class()
                 self.providers[provider.provider_name] = provider
-        return self.providers[provider_name]
+        return self.providers.get(provider_name)
 
 
 class GitHub(AuthClient):
@@ -52,59 +61,50 @@ class GitHub(AuthClient):
         return jsonify({'url': url})
         
     def fetch(self, args):
+        if 'code' not in args:
+            return None, None
+
         self.client.fetch_access_token(code=args['code'])
 
         user = self.client.get('user').json()
-        return 'github${}'.format(user['id']), user['email']
+        return 'github${}'.format(user['id']), user.get('email')
         
 
+class Facebook(AuthClient):
+    def __init__(self):
+        super(Facebook, self).__init__('facebook')
+        self.client = OAuthClient(
+            client_key=self.client_key,
+            client_secret=self.client_secret,
+            api_base_url='https://graph.facebook.com/v2.11',
+            access_token_url='https://graph.facebook.com/v2.11/oauth/access_token',
+            access_token_params={'method': 'GET'},
+            authorize_url='https://www.facebook.com/v2.11/dialog/oauth',
+            client_kwargs={'scope': 'email'},
+        )
 
-#class FacebookSignIn(OAuthSignIn):
-#    def __init__(self):
-#        super(FacebookSignIn, self).__init__('facebook')
-#        self.service = OAuth2Service(
-#            name='facebook',
-#            client_id=self.consumer_id,
-#            client_secret=self.consumer_secret,
-#            authorize_url='https://graph.facebook.com/oauth/authorize',
-#            access_token_url='https://graph.facebook.com/oauth/access_token',
-#            base_url='https://graph.facebook.com/'
-#        )
-#
-#    def authorize(self):
-#        url = self.service.get_authorize_url(
-#            scope='email',
-#            response_type='code',
-#            redirect_uri=self.get_callback_url()
-#        )
-#        return jsonify({'redirect': url})
-#
-#    def callback(self, args):
-#        #def decode_json(payload):
-#        #    return json.loads(payload.decode('utf-8'))
-#
-#        if 'code' not in args:
-#            return None, None, None
-#        oauth_session = self.service.get_auth_session(
-#            data={'code': args['code'],
-#                  #'grant_type': 'authorization_code',
-#                  'redirect_uri': self.get_callback_url()},
-#            #decoder=decode_json
-#        )
-#        me = session.get('me').json()
-#        return (
-#            'facebook$' + me['id'],
-#            me.get('email')
-#        )
-#        #me = oauth_session.get('me?fields=id,email').json()
-#        #return (
-#        #    'facebook$' + me['id'],
-#        #    me.get('email').split('@')[0],  # Facebook does not provide
-#        #                                    # username, so the email's user
-#        #                                    # is used instead
-#        #    me.get('email')
-#        #)
-#
+    def authorization_url(self):
+        url, state = self.client.generate_authorize_redirect(
+            callback_uri=self._callback_url()
+        )
+        return jsonify({'url': url})
+        
+    def fetch(self, args):
+        if 'code' not in args:
+            return None, None
+
+        try:
+            self.client.fetch_access_token(
+                code=args['code'],
+                callback_uri=self._callback_url()
+            )
+
+            user = self.client.get('me?fields=id,email').json()
+        except OAuthException as e:
+            raise AuthException(e.message.get('message'))
+
+        return 'facbook${}'.format(user['id']), user.get('email')
+
 
 #class TwitterSignIn(OAuthSignIn):
 #    def __init__(self):

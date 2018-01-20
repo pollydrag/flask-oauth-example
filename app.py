@@ -1,7 +1,7 @@
-from flask import Flask, request
+from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 
-from oauth import AuthClient
+from oauth import AuthClient, AuthException
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'top secret!'
@@ -34,23 +34,34 @@ class User(db.Model):
 @app.route('/oauth/<provider>/redirect')
 def oauth_authorize(provider):
     oauth = AuthClient.get_provider(provider)
+    if oauth is None:
+        return jsonify({'error': 'Provider {} does not exists'.format(provider)})
+
     return oauth.authorization_url()
 
 
 # TODO: move to frontend
-@app.route('/callback/<provider>')
+@app.route('/oauth/<provider>/callback')
 def oauth_callback(provider):
     return 'OK'
 
-from flask import jsonify
 @app.route('/oauth/<provider>/token')
 def oauth_token(provider):
     oauth = AuthClient.get_provider(provider)
-    social_id, email = oauth.fetch(request.args) # TODO: remove username
+    if oauth is None:
+        return jsonify({'error': 'Provider {} does not exists'.format(provider)})
+
+    try:
+        social_id, email = oauth.fetch(request.args)
+    except AuthException as e:
+        # TODO: make_error
+        return jsonify({'error': str(e)})
+
     if social_id is None:
-        # TODO make_error
+        # TODO: make_error
         return jsonify({'error': 'Not autorized'})
     if email is None:
+        # TODO: make_error
         return jsonify({'error': 'Email not provided'})
 
     user = User.query.filter_by(social_id=social_id).first()
